@@ -1,0 +1,11 @@
+streamlit
+numpy
+pandas
+matplotlib
+pillow
+pydicom
+requests
+kaggle
+scikit-learn
+shap
+opencv-python

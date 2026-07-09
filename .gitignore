@@ -1,0 +1,28 @@
+# Segredos e configuração local do Streamlit
+.streamlit/secrets.toml
+.streamlit/app_config.json
+
+# Dataset local (baixado via Kaggle API/CLI ou manualmente)
+data/
+
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
