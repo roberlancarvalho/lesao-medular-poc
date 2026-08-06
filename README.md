@@ -138,17 +138,12 @@ neste repositório cobrindo:
 ## Estrutura do projeto
 
 ```text
-app.py                        # aplicação Streamlit (ponto de entrada único)
+app.py                        # aplicação Streamlit (ponto de entrada único, concentra todo o pipeline)
 requirements_streamlit_v2.txt # dependências do pipeline
 .streamlit/                   # config local e credenciais (gerado em tempo de execução, não versionado)
 data/                         # dataset local (não versionado)
 reports/                      # relatórios JSON gerados a cada execução (não versionado)
 ```
-
-> **Nota:** o pacote `src/` presente no repositório contém uma versão simplificada/antiga de
-> alguns componentes visuais e não é importado por `app.py`, que concentra toda a lógica real
-> do pipeline. Ele é mantido por enquanto por compatibilidade histórica, mas não reflete o
-> estado atual da aplicação.
 
 ## Maturidade científica do protótipo
 
