@@ -11,6 +11,25 @@ visual (Grad-CAM), lógica fuzzy, um classificador de anomalia visual (Isolation
 embeddings de ResNet50) e um modelo clínico (Random Forest + XGBoost, com SHAP) para gerar
 uma probabilidade simulada de recuperação motora e um Risco Multimodal explícito.
 
+## Capturas de tela
+
+**Visão geral da execução** — MRI carregada, mapa Grad-CAM, interpretação fuzzy, predição
+clínica (Random Forest x XGBoost), explicabilidade SHAP e relatório técnico:
+
+![Visão geral do app: MRI, Grad-CAM, fuzzy, predição clínica, SHAP e relatório JSON](docs/screenshots/visao-geral-app.png)
+
+**Topo da página e desacoplamento Módulo 1 vs Módulo 2** — aviso acadêmico, indicadores
+principais (escore de anomalia, fuzzy, probabilidade, risco) e o painel que contrasta o risco
+calculado só a partir da imagem (visual isolado) com o Risco Multimodal final, após a fusão
+com o quadro clínico:
+
+![Painel de Risco Multimodal comparando o risco visual isolado com o risco após a fusão clínica](docs/screenshots/risco-multimodal-desacoplamento.png)
+
+> No exemplo acima, os dois riscos coincidem (**Baixo**). Quando o quadro clínico é grave (ex.:
+> Escala ASIA A, força motora baixa) mesmo com uma MRI classificada como "Leve", o painel
+> destaca a divergência com um aviso — evidenciando que o Risco Multimodal pondera o contexto
+> clínico em vez de replicar diretamente o sinal da imagem.
+
 ## Funcionalidades
 
 - Leitura de imagens em PNG, JPG/JPEG e DICOM (upload manual, dataset local, Kaggle API ou URL).
@@ -75,6 +94,33 @@ py -m streamlit run app.py
 ```
 
 O app abre automaticamente no navegador em `http://localhost:8501`.
+
+## Como interpretar os resultados
+
+Depois de carregar uma imagem e preencher os dados clínicos na barra lateral, clique em
+**"Executar análise multimodal"** (ou deixe rodar automaticamente, se a opção estiver ativa
+em Configurações). A tela principal mostra, em sequência:
+
+1. **Escore de Anomalia MRI**, **Classificação Fuzzy** (Leve/Moderado/Severo) e a
+   **probabilidade simulada de recuperação** em 1 ano.
+2. **Risco visual isolado vs Risco Multimodal** — o ponto mais importante para entender a
+   proposta do artigo. O primeiro vem só da imagem (Módulo 1); o segundo vem da fusão com o
+   quadro clínico (Módulo 2). Quando eles **divergem**, o app avisa explicitamente — é o caso,
+   por exemplo, de uma MRI "Leve" combinada com Escala ASIA A e força motora mínima, que ainda
+   assim resulta em Risco Multimodal **Alto**.
+3. **Módulo 1 (visão computacional)**: a MRI carregada lado a lado com o mapa Grad-CAM e a
+   tabela de graus de pertinência fuzzy.
+4. **Módulo 2 (predição clínica)**: as variáveis EMSCI usadas (ASIA, nível neurológico,
+   UEMS/LEMS, idade, tempo desde o trauma), o gráfico de probabilidade e a explicabilidade
+   SHAP.
+5. **Comparação Random Forest vs XGBoost**, com métricas de acurácia/AUC em holdout sintético.
+6. **Relatório técnico**: JSON com todos os parâmetros e saídas da execução, disponível para
+   download e também salvo automaticamente em `reports/`.
+
+Para reproduzir o cenário de desacoplamento descrito no artigo (imagem "leve" não implica
+risco baixo), tente **Escala ASIA A**, **UEMS/LEMS próximos de 0** e uma imagem com escore de
+anomalia baixo — o Risco Multimodal deve virar **Alto** mesmo com a classificação fuzzy
+"Leve".
 
 ## Configurando o dataset (RSNA 2024 Lumbar Spine)
 
