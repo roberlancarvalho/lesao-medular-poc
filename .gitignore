@@ -5,6 +5,9 @@
 # Dataset local (baixado via Kaggle API/CLI ou manualmente)
 data/
 
+# Relatórios técnicos gerados a cada execução (artefatos locais, não versionados)
+reports/*.json
+
 # Ambiente virtual
 .venv/
 venv/

@@ -8,4 +8,6 @@ requests
 kaggle
 scikit-learn
 shap
+xgboost
 opencv-python
+tensorflow; python_version < "3.13"

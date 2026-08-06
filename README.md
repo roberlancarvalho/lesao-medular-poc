@@ -5,10 +5,11 @@
 > arquitetura, integração multimodal e explicabilidade — não possuem validade clínica.
 
 Aplicação [Streamlit](https://streamlit.io/) que integra leitura de imagens de MRI/DICOM,
-dados clínicos simulados (Escala ASIA, força motora), explicabilidade visual (Grad-CAM),
-lógica fuzzy, um classificador de anomalia visual (Isolation Forest sobre embeddings de
-ResNet50) e um modelo clínico (Random Forest + SHAP) para gerar uma probabilidade simulada
-de recuperação motora.
+dados clínicos simulados inspirados no protocolo EMSCI (Escala ASIA, força motora por
+miótomos-chave UEMS/LEMS, nível neurológico, idade, tempo desde o trauma), explicabilidade
+visual (Grad-CAM), lógica fuzzy, um classificador de anomalia visual (Isolation Forest sobre
+embeddings de ResNet50) e um modelo clínico (Random Forest + XGBoost, com SHAP) para gerar
+uma probabilidade simulada de recuperação motora e um Risco Multimodal explícito.
 
 ## Funcionalidades
 
@@ -17,9 +18,11 @@ de recuperação motora.
 - Escore de anomalia visual com **Isolation Forest** treinado sobre os embeddings.
 - Classificação fuzzy (Leve / Moderado / Severo) a partir do escore de anomalia.
 - Predição clínica com **Random Forest** treinado em dados sintéticos + explicabilidade com **SHAP**.
+- Comparação lado a lado com **XGBoost** treinado na mesma base sintética (métricas de acurácia/AUC em holdout).
 - Painel de configuração persistente (`.streamlit/app_config.json`) para caminhos de dataset,
   limites de listagem e credenciais do Kaggle.
-- Download do relatório técnico da execução em JSON.
+- Download do relatório técnico da execução em JSON, com persistência automática em `reports/`
+  (um arquivo por execução, com timestamp no nome, para auditoria posterior).
 
 Quando uma dependência opcional (TensorFlow, SHAP, OpenCV) não está disponível no ambiente,
 o app cai automaticamente em um modo simulado/heurístico equivalente, para nunca quebrar a
@@ -27,12 +30,11 @@ demonstração.
 
 ## Pré-requisitos
 
-- **Python 3.10 a 3.12** (recomendado). O pipeline básico (fuzzy, Random Forest, SHAP,
-  Isolation Forest, leitura de DICOM) funciona em qualquer uma dessas versões.
-  - Se quiser o backend visual real com **ResNet50/Grad-CAM**, use **Python 3.11 ou 3.12** —
-    até o momento o TensorFlow não possui build oficial para Python 3.13/3.14. Em versões mais
-    novas do Python o app continua funcionando normalmente, mas usando o heatmap visual
-    simulado como substituto do Grad-CAM real.
+- **Python 3.10 a 3.12** (recomendado) para ter o backend visual real com **ResNet50/Grad-CAM**
+  instalado automaticamente. Em **Python 3.13/3.14** o app continua funcionando normalmente
+  (fuzzy, Random Forest, XGBoost, SHAP, Isolation Forest, leitura de DICOM), mas usando o
+  heatmap visual simulado como substituto do Grad-CAM real, pois o TensorFlow ainda não
+  possui build oficial para essas versões do Python.
 - pip atualizado.
 - (Opcional) Conta no [Kaggle](https://www.kaggle.com/) com API Key, caso queira baixar o
   dataset RSNA diretamente pela interface.
@@ -58,13 +60,11 @@ python -m pip install -r requirements_streamlit_v2.txt
 ```
 
 O arquivo `requirements_streamlit_v2.txt` cobre o pipeline completo (Streamlit, scikit-learn,
-SHAP, OpenCV, pydicom, kaggle, etc.). O **TensorFlow não está incluído** por padrão — instale
-manualmente (`pip install tensorflow`) apenas se estiver usando Python 3.11/3.12 e quiser o
-backend visual real:
-
-```bash
-pip install tensorflow
-```
+XGBoost, SHAP, OpenCV, pydicom, kaggle, TensorFlow, etc.). O TensorFlow é instalado
+**automaticamente por padrão em Python 3.10, 3.11 e 3.12** (marcador `python_version < "3.13"`
+no requirements). Em **Python 3.13/3.14** o `pip install` pula o TensorFlow — ainda não há
+build oficial dele para essas versões — e o app cai automaticamente no heatmap visual
+simulado como substituto do Grad-CAM real.
 
 ## Executando a aplicação
 
@@ -142,7 +142,13 @@ app.py                        # aplicação Streamlit (ponto de entrada único)
 requirements_streamlit_v2.txt # dependências do pipeline
 .streamlit/                   # config local e credenciais (gerado em tempo de execução, não versionado)
 data/                         # dataset local (não versionado)
+reports/                      # relatórios JSON gerados a cada execução (não versionado)
 ```
+
+> **Nota:** o pacote `src/` presente no repositório contém uma versão simplificada/antiga de
+> alguns componentes visuais e não é importado por `app.py`, que concentra toda a lógica real
+> do pipeline. Ele é mantido por enquanto por compatibilidade histórica, mas não reflete o
+> estado atual da aplicação.
 
 ## Maturidade científica do protótipo
 
@@ -150,10 +156,11 @@ data/                         # dataset local (não versionado)
 |---|---|
 | Leitura real de DICOM | ✅ Implementado |
 | Interface clínica demonstrativa | ✅ Implementado |
-| Embeddings ResNet50 + Grad-CAM | ✅ Real (requer TensorFlow); fallback simulado quando indisponível |
+| Embeddings ResNet50 + Grad-CAM | ✅ Real (TensorFlow instalado por padrão em Python <3.13); fallback simulado em Python 3.13/3.14 |
 | Isolation Forest | ✅ Real (requer scikit-learn + embeddings) |
 | Lógica fuzzy | ✅ Implementado (heurística) |
 | Predição clínica (Random Forest) | ✅ Real, treinado em dados **sintéticos** |
+| Predição clínica (XGBoost, comparação) | ✅ Real (requer pacote `xgboost`), treinado em dados **sintéticos** |
 | SHAP | ✅ Real (requer pacote `shap`); fallback heurístico quando indisponível |
 
 **Limitação importante:** o dataset usado (RSNA 2024 Lumbar Spine Degenerative

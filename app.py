@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import zipfile
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
@@ -73,6 +74,14 @@ except Exception:
     shap = None
     SHAP_AVAILABLE = False
 
+try:
+    from xgboost import XGBClassifier
+
+    XGBOOST_AVAILABLE = True
+except Exception:
+    XGBClassifier = None
+    XGBOOST_AVAILABLE = False
+
 
 # ============================================================
 # app.py
@@ -98,12 +107,14 @@ except Exception:
 # Constantes e configuração persistente
 # ============================================================
 
-APP_VERSION = "v4.0-modelos-reais"
+APP_VERSION = "v5.0-emsci-multimodal"
 DEFAULT_KAGGLE_COMPETITION = "rsna-2024-lumbar-spine-degenerative-classification"
 
 CONFIG_DIR = Path(".streamlit")
 APP_CONFIG_PATH = CONFIG_DIR / "app_config.json"
 SECRETS_PATH = CONFIG_DIR / "secrets.toml"
+
+REPORTS_DIR = Path("reports")
 
 DEFAULT_CONFIG = {
     "dataset_root": "data/rsna",
@@ -148,6 +159,23 @@ def save_app_config(config: dict) -> None:
 
     with APP_CONFIG_PATH.open("w", encoding="utf-8") as file:
         json.dump(config, file, indent=2, ensure_ascii=False)
+
+
+def persist_execution_report(report_payload: dict) -> Path:
+    """
+    Salva o relatório técnico da execução em reports/, além do download manual.
+
+    Reforça a rastreabilidade experimental discutida na Seção 3.1.2 do artigo:
+    cada execução vira um artefato versionável em disco, não só um payload de sessão.
+    """
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_relatorio_execucao.json"
+    report_path = REPORTS_DIR / filename
+
+    with report_path.open("w", encoding="utf-8") as file:
+        json.dump(report_payload, file, indent=2, ensure_ascii=False)
+
+    return report_path
 
 
 def save_kaggle_secrets(username: str, key: str) -> None:
@@ -816,6 +844,29 @@ def fuzzy_anomaly(score: float) -> dict:
     return {"label": label, "memberships": memberships}
 
 
+def classify_visual_only_risk(fuzzy_label: str) -> str:
+    """
+    Risco calculado a partir exclusivamente do escore visual (Módulo 1), ignorando
+    o quadro clínico. Serve apenas de contraponto para evidenciar o desacoplamento
+    funcional descrito na Seção 3.3 do artigo — não é o risco final do sistema.
+    """
+    return {"Leve": "Baixo", "Moderado": "Intermediário", "Severo": "Alto"}[fuzzy_label]
+
+
+def classify_multimodal_risk(probability: float) -> str:
+    """
+    Risco Multimodal final: resultado da fusão tardia em nível tabular (Módulo 2),
+    que pondera o escore visual junto ao quadro clínico (ASIA, força motora, idade,
+    nível neurológico, tempo desde o trauma) — não replica diretamente o sinal
+    imagiológico isolado.
+    """
+    if probability >= 0.70:
+        return "Baixo"
+    if probability >= 0.40:
+        return "Intermediário"
+    return "Alto"
+
+
 # ============================================================
 # Módulo clínico real: Random Forest sintético + SHAP
 # ============================================================
@@ -826,6 +877,84 @@ def asia_to_numeric(asia: str) -> float:
 
 def asia_to_risk_numeric(asia: str) -> float:
     return {"A": 1.00, "B": 0.80, "C": 0.55, "D": 0.25, "E": 0.05}[asia]
+
+
+# Nível neurológico ISNCSCI/EMSCI, ordenado rostro-caudal (C1 = mais grave/alto -> S5 = mais leve/baixo).
+NEURO_LEVELS = (
+    [f"C{i}" for i in range(1, 9)]
+    + [f"T{i}" for i in range(1, 13)]
+    + [f"L{i}" for i in range(1, 6)]
+    + [f"S{i}" for i in range(1, 6)]
+)
+
+
+def neuro_level_to_numeric(level: str) -> float:
+    """0.0 (C1, lesão mais alta/grave) a 1.0 (S5, lesão mais baixa/leve)."""
+    return NEURO_LEVELS.index(level) / (len(NEURO_LEVELS) - 1)
+
+
+def _build_synthetic_clinical_dataset():
+    """
+    Gera a base clínica sintética (seed fixa) compartilhada pelos modelos
+    baseados em árvores (Random Forest e XGBoost), conforme Seção 3.1.2 do artigo.
+
+    As variáveis seguem o protocolo EMSCI citado na Seção 3.3: escala ASIA, força
+    motora por miótomos-chave (UEMS/LEMS, agregados por membro superior e inferior,
+    conforme o próprio padrão ISNCSCI/EMSCI), nível neurológico e atributos
+    clínico-demográficos (idade, tempo desde o trauma).
+    """
+    rng = np.random.default_rng(42)
+    n_samples = 500
+
+    asia_classes = np.array(["A", "B", "C", "D", "E"])
+    asia_probs = np.array([0.18, 0.18, 0.24, 0.28, 0.12])
+    asia = rng.choice(asia_classes, size=n_samples, p=asia_probs)
+    asia_num = np.array([asia_to_numeric(x) for x in asia], dtype=np.float32)
+    asia_risk = np.array([asia_to_risk_numeric(x) for x in asia], dtype=np.float32)
+
+    uems = np.clip(rng.normal(loc=10 + 32 * asia_num, scale=9, size=n_samples), 0, 50)
+    lems = np.clip(rng.normal(loc=10 + 32 * asia_num, scale=9, size=n_samples), 0, 50)
+    uems_norm = uems / 50.0
+    lems_norm = lems / 50.0
+
+    neuro_level_idx = rng.integers(0, len(NEURO_LEVELS), size=n_samples)
+    neuro_level_norm = neuro_level_idx / (len(NEURO_LEVELS) - 1)
+
+    age = np.clip(rng.normal(loc=45, scale=18, size=n_samples), 15, 90)
+    age_norm = (age - 15) / (90 - 15)
+
+    days_since_trauma = np.clip(rng.exponential(scale=60, size=n_samples), 0, 365)
+    time_norm = days_since_trauma / 365.0
+
+    anomaly_score = np.clip(rng.beta(a=2.0, b=3.0, size=n_samples) + rng.normal(0, 0.08, size=n_samples), 0, 1)
+
+    latent = (
+        -1.10
+        + 2.15 * asia_num
+        + 1.40 * uems_norm
+        + 1.40 * lems_norm
+        - 1.65 * anomaly_score
+        - 0.65 * asia_risk
+        + 0.55 * neuro_level_norm
+        - 0.45 * age_norm
+        - 0.35 * time_norm
+        + rng.normal(0, 0.35, size=n_samples)
+    )
+    probability = 1 / (1 + np.exp(-latent))
+    target = (probability >= 0.50).astype(int)
+
+    X = pd.DataFrame(
+        {
+            "Força Motora — Membros Superiores (UEMS)": uems.astype(float),
+            "Força Motora — Membros Inferiores (LEMS)": lems.astype(float),
+            "Escala ASIA": asia_num.astype(float),
+            "Nível Neurológico": neuro_level_norm.astype(float),
+            "Idade": age.astype(float),
+            "Tempo desde o Trauma (dias)": days_since_trauma.astype(float),
+            "Características da MRI": anomaly_score.astype(float),
+        }
+    )
+    return X, target
 
 
 @st.cache_resource(show_spinner=False)
@@ -841,28 +970,7 @@ def train_multimodal_classifier_backend():
     if not SKLEARN_AVAILABLE:
         raise ModelBackendError("scikit-learn não está instalado. Rode: py -m pip install scikit-learn")
 
-    rng = np.random.default_rng(42)
-    n_samples = 500
-    asia_classes = np.array(["A", "B", "C", "D", "E"])
-    asia_probs = np.array([0.18, 0.18, 0.24, 0.28, 0.12])
-    asia = rng.choice(asia_classes, size=n_samples, p=asia_probs)
-    asia_num = np.array([asia_to_numeric(x) for x in asia], dtype=np.float32)
-    asia_risk = np.array([asia_to_risk_numeric(x) for x in asia], dtype=np.float32)
-    motor_strength = np.clip(rng.normal(loc=20 + 65 * asia_num, scale=16, size=n_samples), 0, 100)
-    motor_norm = motor_strength / 100.0
-    anomaly_score = np.clip(rng.beta(a=2.0, b=3.0, size=n_samples) + rng.normal(0, 0.08, size=n_samples), 0, 1)
-
-    latent = -1.10 + 2.15 * asia_num + 2.35 * motor_norm - 1.65 * anomaly_score - 0.65 * asia_risk + rng.normal(0, 0.35, size=n_samples)
-    probability = 1 / (1 + np.exp(-latent))
-    target = (probability >= 0.50).astype(int)
-
-    X = pd.DataFrame(
-        {
-            "Força Motora": motor_strength.astype(float),
-            "Escala ASIA": asia_num.astype(float),
-            "Características da MRI": anomaly_score.astype(float),
-        }
-    )
+    X, target = _build_synthetic_clinical_dataset()
     model = RandomForestClassifier(
         n_estimators=300,
         max_depth=5,
@@ -874,17 +982,63 @@ def train_multimodal_classifier_backend():
     return model, X, target
 
 
-def build_patient_features(asia: str, motor_strength: int, anomaly_score: float) -> pd.DataFrame:
+@st.cache_resource(show_spinner=False)
+def train_xgboost_backend():
+    """
+    Treina XGBoost real na mesma base sintética do Random Forest.
+
+    O artigo cita Random Forest e XGBoost como algoritmos baseados em árvores
+    priorizados no Módulo 2; este backend adiciona o segundo modelo para
+    comparação, mantendo a mesma limitação de validade clínica (dados sintéticos).
+    """
+    if not XGBOOST_AVAILABLE:
+        raise ModelBackendError("xgboost não está instalado. Rode: py -m pip install xgboost")
+
+    X, target = _build_synthetic_clinical_dataset()
+    model = XGBClassifier(
+        n_estimators=300,
+        max_depth=4,
+        learning_rate=0.08,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        random_state=42,
+        eval_metric="logloss",
+    )
+    model.fit(X, target)
+    return model, X, target
+
+
+def build_patient_features(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "Força Motora": [float(motor_strength)],
+            "Força Motora — Membros Superiores (UEMS)": [float(uems)],
+            "Força Motora — Membros Inferiores (LEMS)": [float(lems)],
             "Escala ASIA": [float(asia_to_numeric(asia))],
+            "Nível Neurológico": [float(neuro_level_to_numeric(neuro_level))],
+            "Idade": [float(age)],
+            "Tempo desde o Trauma (dias)": [float(days_since_trauma)],
             "Características da MRI": [float(anomaly_score)],
         }
     )
 
 
-def simulate_recovery_probability(asia: str, motor_strength: int, anomaly_score: float) -> float:
+def simulate_recovery_probability(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> float:
     """
     Gera probabilidade com RandomForestClassifier real treinado em DataFrame sintético.
 
@@ -892,24 +1046,104 @@ def simulate_recovery_probability(asia: str, motor_strength: int, anomaly_score:
     """
     try:
         model, _, _ = train_multimodal_classifier_backend()
-        patient_X = build_patient_features(asia, motor_strength, anomaly_score)
+        patient_X = build_patient_features(asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score)
         probability = float(model.predict_proba(patient_X)[0, 1])
         return float(np.clip(probability, 0.01, 0.99))
     except Exception:
         asia_num = asia_to_numeric(asia)
-        motor_norm = motor_strength / 100.0
+        motor_norm = (uems + lems) / 100.0
         logit = -1.05 + 2.05 * asia_num + 2.25 * motor_norm - 1.85 * anomaly_score
         probability = sigmoid(logit)
         return float(np.clip(probability, 0.01, 0.99))
 
 
-def simulate_shap_importance(asia: str, motor_strength: int, anomaly_score: float) -> pd.DataFrame:
+def simulate_recovery_probability_xgboost(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> float:
+    """Gera probabilidade com XGBClassifier real, para comparação com o Random Forest."""
+    try:
+        model, _, _ = train_xgboost_backend()
+        patient_X = build_patient_features(asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score)
+        probability = float(model.predict_proba(patient_X)[0, 1])
+        return float(np.clip(probability, 0.01, 0.99))
+    except Exception:
+        return simulate_recovery_probability(asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score)
+
+
+@st.cache_data(show_spinner=False)
+def compare_tree_models_backend() -> dict:
+    """
+    Compara Random Forest e XGBoost em um holdout (30%) da base clínica sintética.
+
+    Uso exclusivamente demonstrativo: mede se os dois algoritmos citados no artigo
+    concordam entre si sobre os mesmos dados sintéticos, sem qualquer validade clínica.
+    """
+    from sklearn.metrics import accuracy_score, roc_auc_score
+    from sklearn.model_selection import train_test_split
+
+    X, target = _build_synthetic_clinical_dataset()
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, target, test_size=0.3, random_state=42, stratify=target
+    )
+
+    results = {}
+
+    if SKLEARN_AVAILABLE:
+        rf = RandomForestClassifier(
+            n_estimators=300,
+            max_depth=5,
+            min_samples_leaf=8,
+            class_weight="balanced",
+            random_state=42,
+        )
+        rf.fit(X_train, y_train)
+        rf_proba = rf.predict_proba(X_test)[:, 1]
+        results["Random Forest"] = {
+            "Acurácia": float(accuracy_score(y_test, (rf_proba >= 0.5).astype(int))),
+            "AUC": float(roc_auc_score(y_test, rf_proba)),
+        }
+
+    if XGBOOST_AVAILABLE:
+        xgb_model = XGBClassifier(
+            n_estimators=300,
+            max_depth=4,
+            learning_rate=0.08,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            random_state=42,
+            eval_metric="logloss",
+        )
+        xgb_model.fit(X_train, y_train)
+        xgb_proba = xgb_model.predict_proba(X_test)[:, 1]
+        results["XGBoost"] = {
+            "Acurácia": float(accuracy_score(y_test, (xgb_proba >= 0.5).astype(int))),
+            "AUC": float(roc_auc_score(y_test, xgb_proba)),
+        }
+
+    return results
+
+
+def simulate_shap_importance(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> pd.DataFrame:
     """
     Calcula valores SHAP reais para o paciente específico.
 
     Retorna DataFrame no mesmo formato que a interface já usa.
     """
-    patient_X = build_patient_features(asia, motor_strength, anomaly_score)
+    patient_X = build_patient_features(asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score)
     try:
         if not SHAP_AVAILABLE:
             raise ModelBackendError("SHAP não está instalado. Rode: py -m pip install shap")
@@ -939,10 +1173,13 @@ def simulate_shap_importance(asia: str, motor_strength: int, anomaly_score: floa
         return df.sort_values("Peso relativo", ascending=True)
     except Exception:
         asia_num = asia_to_numeric(asia)
-        motor_norm = motor_strength / 100.0
         weights = {
-            "Força Motora": 0.45 + 0.20 * motor_norm,
+            "Força Motora — Membros Superiores (UEMS)": 0.30 + 0.15 * (uems / 50.0),
+            "Força Motora — Membros Inferiores (LEMS)": 0.30 + 0.15 * (lems / 50.0),
             "Escala ASIA": 0.35 + 0.25 * asia_num,
+            "Nível Neurológico": 0.15 + 0.10 * neuro_level_to_numeric(neuro_level),
+            "Idade": 0.10 + 0.05 * (age / 90.0),
+            "Tempo desde o Trauma (dias)": 0.10 + 0.05 * (days_since_trauma / 365.0),
             "Características da MRI": 0.25 + 0.40 * anomaly_score,
         }
         total = sum(weights.values())
@@ -1350,7 +1587,7 @@ else:
     )
 
 st.sidebar.divider()
-st.sidebar.subheader("Dados clínicos simulados")
+st.sidebar.subheader("Dados clínicos simulados (protocolo EMSCI)")
 
 asia_scale = st.sidebar.selectbox(
     "Escala ASIA Baseline",
@@ -1359,11 +1596,47 @@ asia_scale = st.sidebar.selectbox(
     help="A = lesão completa; E = função neurológica normal.",
 )
 
-motor_strength = st.sidebar.slider(
-    "Força Motora Baseline",
+neuro_level = st.sidebar.selectbox(
+    "Nível Neurológico da Lesão",
+    options=NEURO_LEVELS,
+    index=NEURO_LEVELS.index("C6"),
+    help="Nível mais caudal com função motora/sensitiva normal (padrão ISNCSCI/EMSCI).",
+)
+
+uems = st.sidebar.slider(
+    "Força Motora — Membros Superiores (UEMS, 0–50)",
     min_value=0,
-    max_value=100,
-    value=55,
+    max_value=50,
+    value=28,
+    step=1,
+    help="Soma dos escores dos 5 miótomos-chave (C5–T1) de cada lado, padrão ISNCSCI.",
+)
+
+lems = st.sidebar.slider(
+    "Força Motora — Membros Inferiores (LEMS, 0–50)",
+    min_value=0,
+    max_value=50,
+    value=27,
+    step=1,
+    help="Soma dos escores dos 5 miótomos-chave (L2–S1) de cada lado, padrão ISNCSCI.",
+)
+
+motor_strength = uems + lems
+st.sidebar.caption(f"Força Motora Total (UEMS + LEMS): **{motor_strength}/100**")
+
+age = st.sidebar.slider(
+    "Idade (anos)",
+    min_value=15,
+    max_value=90,
+    value=40,
+    step=1,
+)
+
+days_since_trauma = st.sidebar.slider(
+    "Tempo desde o Trauma (dias)",
+    min_value=0,
+    max_value=365,
+    value=30,
     step=1,
 )
 
@@ -1530,13 +1803,21 @@ if should_run_analysis and image is not None:
 
     probability = simulate_recovery_probability(
         asia=asia_scale,
-        motor_strength=motor_strength,
+        uems=uems,
+        lems=lems,
+        age=age,
+        neuro_level=neuro_level,
+        days_since_trauma=days_since_trauma,
         anomaly_score=anomaly_score,
     )
 
     shap_df = simulate_shap_importance(
         asia=asia_scale,
-        motor_strength=motor_strength,
+        uems=uems,
+        lems=lems,
+        age=age,
+        neuro_level=neuro_level,
+        days_since_trauma=days_since_trauma,
         anomaly_score=anomaly_score,
     )
 
@@ -1554,8 +1835,32 @@ if should_run_analysis and image is not None:
         st.metric("Recuperação em 1 ano", f"{probability:.0%}")
 
     with metric_4:
-        risk_label = "Baixo" if probability >= 0.70 else "Intermediário" if probability >= 0.40 else "Alto"
-        st.metric("Risco funcional", risk_label)
+        risk_label = classify_multimodal_risk(probability)
+        st.metric("Risco Multimodal", risk_label)
+
+    visual_only_risk = classify_visual_only_risk(fuzzy_label)
+
+    st.subheader("Desacoplamento Módulo 1 (visual) vs Módulo 2 (multimodal)")
+    decouple_col_1, decouple_col_2 = st.columns(2)
+    with decouple_col_1:
+        st.metric("Risco visual isolado (só MRI/fuzzy)", visual_only_risk)
+    with decouple_col_2:
+        st.metric("Risco Multimodal (MRI + quadro clínico)", risk_label)
+
+    if visual_only_risk != risk_label:
+        st.warning(
+            f"O escore visual isolado indicaria risco **{visual_only_risk}**, mas a fusão "
+            f"multimodal com Escala ASIA {asia_scale}, nível {neuro_level} e força motora "
+            f"{motor_strength}/100 resulta em **Risco Multimodal {risk_label}**. Este é o "
+            "comportamento descrito na Seção 3.3 do artigo: o Módulo 2 pondera o contexto "
+            "clínico em vez de replicar diretamente o sinal imagiológico isolado."
+        )
+    else:
+        st.info(
+            f"Neste caso, o risco visual isolado (**{visual_only_risk}**) coincide com o "
+            f"Risco Multimodal final (**{risk_label}**) — o quadro clínico não inverteu a "
+            "leitura isolada da imagem."
+        )
 
     with st.expander("Fonte e metadados da imagem", expanded=False):
         rows = [
@@ -1628,13 +1933,23 @@ if should_run_analysis and image is not None:
             {
                 "Variável": [
                     "Escala ASIA Baseline",
-                    "Força Motora Baseline",
+                    "Nível Neurológico",
+                    "Força Motora — UEMS",
+                    "Força Motora — LEMS",
+                    "Força Motora Total",
+                    "Idade",
+                    "Tempo desde o Trauma",
                     "Escore de Anomalia MRI",
                     "Classe Fuzzy",
                 ],
                 "Valor": [
                     asia_scale,
+                    neuro_level,
+                    f"{uems}/50",
+                    f"{lems}/50",
                     f"{motor_strength}/100",
+                    f"{age} anos",
+                    f"{days_since_trauma} dias",
                     f"{anomaly_score:.3f}",
                     fuzzy_label,
                 ],
@@ -1660,8 +1975,10 @@ if should_run_analysis and image is not None:
             """
             **Leitura clínica do gráfico**
 
-            - **Força Motora**: condição funcional basal.
+            - **UEMS / LEMS**: força motora por miótomos-chave (membros superiores/inferiores).
             - **Escala ASIA**: gravidade neurológica inicial.
+            - **Nível Neurológico**: posição rostro-caudal da lesão.
+            - **Idade** e **Tempo desde o Trauma**: covariáveis clínico-demográficas do EMSCI.
             - **Características da MRI**: biomarcador visual derivado do módulo de imagem.
 
             Em versão real, esses pesos devem ser calculados com `SHAP`
@@ -1675,6 +1992,36 @@ if should_run_analysis and image is not None:
             hide_index=True,
         )
 
+    st.header("Comparação de modelos baseados em árvores — Random Forest vs XGBoost")
+
+    xgboost_probability = simulate_recovery_probability_xgboost(
+        asia=asia_scale,
+        uems=uems,
+        lems=lems,
+        age=age,
+        neuro_level=neuro_level,
+        days_since_trauma=days_since_trauma,
+        anomaly_score=anomaly_score,
+    )
+
+    compare_col_1, compare_col_2 = st.columns(2)
+    with compare_col_1:
+        st.metric("Recuperação em 1 ano (Random Forest)", f"{probability:.0%}")
+    with compare_col_2:
+        st.metric("Recuperação em 1 ano (XGBoost)", f"{xgboost_probability:.0%}")
+
+    if not XGBOOST_AVAILABLE:
+        st.warning("xgboost não está instalado. Rode: py -m pip install xgboost")
+    else:
+        with st.expander("Métricas de validação em holdout sintético (30%)", expanded=False):
+            st.caption(
+                "Métricas calculadas sobre a base clínica sintética (mesmo random_state=42 usado "
+                "no treino), apenas para comparar os dois algoritmos citados no artigo. Sem validade clínica."
+            )
+            metrics = compare_tree_models_backend()
+            metrics_df = pd.DataFrame(metrics).T
+            st.dataframe(metrics_df.style.format("{:.3f}"), width="stretch")
+
     st.header("Resumo interpretativo")
 
     if probability >= 0.70:
@@ -1686,10 +2033,12 @@ if should_run_analysis and image is not None:
 
     st.markdown(
         f"""
-        O paciente simulado apresenta **Escala ASIA {asia_scale}**, força motora basal de
-        **{motor_strength}/100** e escore visual de anomalia de **{anomaly_score:.3f}**.
-        A fusão multimodal desses fatores gerou uma probabilidade simulada de recuperação
-        de **{probability:.0%}**, compatível com **{prognosis}**.
+        O paciente simulado apresenta **Escala ASIA {asia_scale}**, nível neurológico
+        **{neuro_level}**, força motora basal de **{motor_strength}/100** (UEMS {uems}/50 +
+        LEMS {lems}/50), **{age} anos**, **{days_since_trauma} dias** desde o trauma e escore
+        visual de anomalia de **{anomaly_score:.3f}**. A fusão multimodal desses fatores gerou
+        uma probabilidade simulada de recuperação de **{probability:.0%}** (Random Forest),
+        compatível com **{prognosis}**.
 
         O protótipo demonstra integração entre visão computacional, dados clínicos estruturados
         e explicabilidade, mantendo rastreabilidade adequada para apresentação acadêmica.
@@ -1699,17 +2048,27 @@ if should_run_analysis and image is not None:
     st.header("Relatório técnico da execução")
 
     report_payload = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
         "app_version": APP_VERSION,
         "image_origin": image_origin_label,
         "data_source": data_source,
         "asia_baseline": asia_scale,
+        "neuro_level_baseline": neuro_level,
+        "uems_baseline": uems,
+        "lems_baseline": lems,
         "motor_strength_baseline": motor_strength,
+        "age": age,
+        "days_since_trauma": days_since_trauma,
         "mri_anomaly_score": round(anomaly_score, 6),
         "fuzzy_class": fuzzy_label,
-        "recovery_probability_1y": round(probability, 6),
-        "functional_risk": risk_label,
+        "recovery_probability_1y_random_forest": round(probability, 6),
+        "recovery_probability_1y_xgboost": round(xgboost_probability, 6),
+        "visual_only_risk": visual_only_risk,
+        "multimodal_risk": risk_label,
         "prototype_warning": "Resultados simulados, sem validade clínica.",
     }
+
+    saved_report_path = persist_execution_report(report_payload)
 
     report_col_1, report_col_2 = st.columns([1, 1])
 
@@ -1724,6 +2083,7 @@ if should_run_analysis and image is not None:
             mime="application/json",
             width="stretch",
         )
+        st.caption(f"Também salvo automaticamente em `{saved_report_path.as_posix()}`.")
 
         st.markdown(
             """
