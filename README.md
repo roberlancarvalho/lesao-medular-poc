@@ -1,5 +1,7 @@
 # Sistema Experimental — Pipeline Multimodal para Prognóstico de Lesão Medular por MRI
 
+[![CI](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml)
+
 > **Aviso acadêmico:** este é um protótipo (PoC) experimental. Ele **não realiza diagnóstico
 > nem prognóstico clínico real**. Os módulos de machine learning existem para demonstrar
 > arquitetura, integração multimodal e explicabilidade — não possuem validade clínica.
@@ -75,10 +77,10 @@ source .venv/bin/activate
 
 # 3. Instale as dependências
 python -m pip install --upgrade pip
-python -m pip install -r requirements_streamlit_v2.txt
+python -m pip install -r requirements.txt
 ```
 
-O arquivo `requirements_streamlit_v2.txt` cobre o pipeline completo (Streamlit, scikit-learn,
+O arquivo `requirements.txt` cobre o pipeline completo (Streamlit, scikit-learn,
 XGBoost, SHAP, OpenCV, pydicom, kaggle, TensorFlow, etc.). O TensorFlow é instalado
 **automaticamente por padrão em Python 3.10, 3.11 e 3.12** (marcador `python_version < "3.13"`
 no requirements). Em **Python 3.13/3.14** o `pip install` pula o TensorFlow — ainda não há
@@ -181,11 +183,66 @@ neste repositório cobrindo:
 - `data/` (o dataset é baixado localmente, não deve ir para o repositório)
 - ambientes virtuais, caches e artefatos (`.venv/`, `__pycache__/`, etc.)
 
+## CI/CD
+
+### CI — verificação automática (GitHub Actions)
+
+A cada `push`/pull request na branch `main`, o workflow em
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda em Python 3.11, 3.12 e 3.13
+(matriz), fazendo:
+
+1. `python -m py_compile app.py` — garante que o arquivo não tem erro de sintaxe.
+2. `ruff check --select F app.py` — lint (imports/variáveis não usadas, nomes indefinidos).
+3. `pytest tests/` — smoke tests que carregam o `app.py` e exercitam fuzzy, Random Forest,
+   XGBoost, o combinador de Risco Multimodal e a persistência do relatório (ver
+   [`tests/test_smoke.py`](tests/test_smoke.py)).
+
+A versão 3.13 na matriz também serve para garantir que o **fallback sem TensorFlow** (heatmap
+simulado no lugar do Grad-CAM real) continua funcionando, já que o `requirements.txt` pula o
+TensorFlow nessa versão do Python.
+
+Para rodar os mesmos testes localmente antes de dar push:
+
+```bash
+pip install pytest ruff
+python -m py_compile app.py
+ruff check --select F app.py
+pytest tests/ -v
+```
+
+### CD — deploy gratuito no Streamlit Community Cloud
+
+O app pode ser publicado de graça em [share.streamlit.io](https://share.streamlit.io/) (conta
+GitHub). O deploy lá é automático a partir do repositório conectado — não depende de um
+workflow de CD no GitHub Actions, só da configuração inicial abaixo:
+
+1. Acesse [share.streamlit.io](https://share.streamlit.io/), entre com sua conta GitHub e
+   clique em **"New app"**.
+2. Selecione o repositório `lesao-medular-poc`, a branch `main` e o arquivo principal `app.py`.
+3. Em **"Advanced settings"**, defina a versão do Python como **3.11 ou 3.12** — é o que faz o
+   `requirements.txt` instalar o TensorFlow de verdade (backend visual real do Grad-CAM). Em
+   Python 3.13 o deploy funciona, mas cai no fallback simulado.
+4. Clique em **"Deploy"**. Qualquer novo `push` na `main` reimplanta automaticamente.
+
+**Duas observações importantes para essa PoC especificamente:**
+
+- **Modo de dados recomendado para demo pública:** use **"Upload manual"** na aba Análise — não
+  depende de dataset nem de credenciais Kaggle, funciona direto no ar. O modo "Kaggle API /
+  baixar dataset" baixa vários GB e pode não caber no disco/tempo do plano gratuito.
+- **Credenciais Kaggle (opcional):** se quiser habilitar o download do dataset no app já
+  publicado, não use a tela de "Configurações" do próprio app em produção (ela grava em
+  `.streamlit/secrets.toml`, que não persiste entre reinicializações no Cloud). Em vez disso,
+  configure `KAGGLE_USERNAME` e `KAGGLE_KEY` no menu **"Secrets"** do painel do Streamlit
+  Community Cloud — o app já lê essas credenciais de variável de ambiente/`st.secrets`
+  automaticamente (`get_kaggle_credentials`).
+
 ## Estrutura do projeto
 
 ```text
 app.py                        # aplicação Streamlit (ponto de entrada único, concentra todo o pipeline)
-requirements_streamlit_v2.txt # dependências do pipeline
+requirements.txt              # dependências do pipeline (nome exigido pelo Streamlit Community Cloud)
+.github/workflows/ci.yml      # CI: lint + smoke test a cada push/PR
+docs/screenshots/             # imagens usadas no README
 .streamlit/                   # config local e credenciais (gerado em tempo de execução, não versionado)
 data/                         # dataset local (não versionado)
 reports/                      # relatórios JSON gerados a cada execução (não versionado)

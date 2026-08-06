@@ -18,6 +18,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+.pytest_cache/
 
 # Claude Code
 .claude/

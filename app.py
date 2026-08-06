@@ -93,7 +93,7 @@ except Exception:
 #   py -m streamlit run app.py
 #
 # Dependências:
-#   py -m pip install -r requirements_streamlit_v2.txt
+#   py -m pip install -r requirements.txt
 #
 # Observação acadêmica:
 #   Esta aplicação é uma PoC/protótipo experimental.
