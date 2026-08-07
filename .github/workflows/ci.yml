@@ -37,7 +37,7 @@ jobs:
       - name: Checar sintaxe (py_compile)
         run: python -m py_compile app.py
 
-      - name: Lint (ruff, apenas erros reais: imports/nomes não usados ou indefinidos)
+      - name: "Lint (ruff): imports/nomes não usados ou indefinidos"
         run: ruff check --select F app.py
 
       - name: Smoke tests do pipeline
