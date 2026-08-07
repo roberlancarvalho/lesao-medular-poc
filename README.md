@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml)
 
+**Demo pública:** [lesao-medular-poc.streamlit.app](https://lesao-medular-poc.streamlit.app/)
+
 > **Aviso acadêmico:** este é um protótipo (PoC) experimental. Ele **não realiza diagnóstico
 > nem prognóstico clínico real**. Os módulos de machine learning existem para demonstrar
 > arquitetura, integração multimodal e explicabilidade — não possuem validade clínica.
@@ -217,7 +219,9 @@ pytest tests/ -v
 
 O app pode ser publicado de graça em [share.streamlit.io](https://share.streamlit.io/) (conta
 GitHub). O deploy lá é automático a partir do repositório conectado — não depende de um
-workflow de CD no GitHub Actions, só da configuração inicial abaixo:
+workflow de CD no GitHub Actions, só da configuração inicial abaixo. Este projeto já está
+publicado em **[lesao-medular-poc.streamlit.app](https://lesao-medular-poc.streamlit.app/)**,
+reimplantado automaticamente a cada push na `main`.
 
 1. Acesse [share.streamlit.io](https://share.streamlit.io/), entre com sua conta GitHub e
    clique em **"New app"**.
