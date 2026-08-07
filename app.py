@@ -1873,31 +1873,45 @@ except Exception as exc:
 should_run_analysis = run_analysis or bool(config.get("enable_auto_analysis", True))
 
 if should_run_analysis and image is not None:
-    anomaly_score, mri_embedding = simulate_anomaly_score(image)
-    fuzzy_result = fuzzy_anomaly(anomaly_score)
-    fuzzy_label = fuzzy_result["label"]
-    memberships = fuzzy_result["memberships"]
-    gradcam_image = simulate_gradcam(image)
+    with st.status("Executando pipeline multimodal...", expanded=True) as pipeline_status:
+        pipeline_status.write(
+            "Extraindo embeddings da MRI e calculando escore de anomalia (ResNet50 + Isolation "
+            "Forest) — a primeira execução pode demorar mais (carrega o TensorFlow e os pesos "
+            "da ResNet50)."
+        )
+        anomaly_score, mri_embedding = simulate_anomaly_score(image)
 
-    probability = simulate_recovery_probability(
-        asia=asia_scale,
-        uems=uems,
-        lems=lems,
-        age=age,
-        neuro_level=neuro_level,
-        days_since_trauma=days_since_trauma,
-        anomaly_score=anomaly_score,
-    )
+        pipeline_status.write("Traduzindo o escore em categoria fuzzy...")
+        fuzzy_result = fuzzy_anomaly(anomaly_score)
+        fuzzy_label = fuzzy_result["label"]
+        memberships = fuzzy_result["memberships"]
 
-    shap_df = simulate_shap_importance(
-        asia=asia_scale,
-        uems=uems,
-        lems=lems,
-        age=age,
-        neuro_level=neuro_level,
-        days_since_trauma=days_since_trauma,
-        anomaly_score=anomaly_score,
-    )
+        pipeline_status.write("Gerando mapa Grad-CAM...")
+        gradcam_image = simulate_gradcam(image)
+
+        pipeline_status.write("Treinando/consultando modelo clínico (Random Forest)...")
+        probability = simulate_recovery_probability(
+            asia=asia_scale,
+            uems=uems,
+            lems=lems,
+            age=age,
+            neuro_level=neuro_level,
+            days_since_trauma=days_since_trauma,
+            anomaly_score=anomaly_score,
+        )
+
+        pipeline_status.write("Calculando explicabilidade SHAP (Random Forest)...")
+        shap_df = simulate_shap_importance(
+            asia=asia_scale,
+            uems=uems,
+            lems=lems,
+            age=age,
+            neuro_level=neuro_level,
+            days_since_trauma=days_since_trauma,
+            anomaly_score=anomaly_score,
+        )
+
+        pipeline_status.update(label="Pipeline concluído", state="complete", expanded=False)
 
     st.divider()
 
@@ -2094,27 +2108,44 @@ if should_run_analysis and image is not None:
         with st.expander("Métricas de validação em holdout sintético (30%)", expanded=False):
             st.caption(
                 "Métricas calculadas sobre a base clínica sintética (mesmo random_state=42 usado "
-                "no treino), apenas para comparar os dois algoritmos citados no artigo. Sem validade clínica."
+                "no treino), apenas para comparar os dois algoritmos citados no artigo. Sem validade clínica. "
+                "Cálculo sob demanda (treina os dois modelos de novo em um holdout à parte) — não roda "
+                "automaticamente a cada interação, para não deixar a página lenta."
             )
-            metrics = compare_tree_models_backend()
-            metrics_df = pd.DataFrame(metrics).T
-            st.dataframe(metrics_df.style.format("{:.3f}"), width="stretch")
+            if st.button("Calcular métricas de validação", key="btn_compare_metrics"):
+                with st.skeleton(height=180):
+                    st.session_state["compare_tree_metrics"] = compare_tree_models_backend()
+            if "compare_tree_metrics" in st.session_state:
+                metrics_df = pd.DataFrame(st.session_state["compare_tree_metrics"]).T
+                st.dataframe(metrics_df.style.format("{:.3f}"), width="stretch")
 
         with st.expander("Explicabilidade SHAP do XGBoost (complementa o SHAP do Random Forest acima)", expanded=False):
-            xgboost_shap_df = simulate_shap_importance_xgboost(
-                asia=asia_scale,
-                uems=uems,
-                lems=lems,
-                age=age,
-                neuro_level=neuro_level,
-                days_since_trauma=days_since_trauma,
-                anomaly_score=anomaly_score,
-            )
-            st.pyplot(plot_shap_bar(xgboost_shap_df), width="stretch")
             st.caption(
-                "TreeSHAP aplicado sobre o XGBoost treinado no mesmo paciente simulado — permite "
-                "comparar quais variáveis cada algoritmo pondera mais."
+                "Cálculo sob demanda (roda TreeSHAP sobre o XGBoost) — não roda automaticamente a cada "
+                "interação, para não deixar a página lenta."
             )
+            xgb_shap_inputs = (asia_scale, uems, lems, age, neuro_level, days_since_trauma, round(anomaly_score, 6))
+            if st.button("Calcular SHAP do XGBoost", key="btn_xgb_shap"):
+                with st.skeleton(height=280):
+                    st.session_state["xgboost_shap_df"] = simulate_shap_importance_xgboost(
+                        asia=asia_scale,
+                        uems=uems,
+                        lems=lems,
+                        age=age,
+                        neuro_level=neuro_level,
+                        days_since_trauma=days_since_trauma,
+                        anomaly_score=anomaly_score,
+                    )
+                    st.session_state["xgboost_shap_inputs"] = xgb_shap_inputs
+            if "xgboost_shap_df" in st.session_state:
+                if st.session_state.get("xgboost_shap_inputs") != xgb_shap_inputs:
+                    st.info("Os dados clínicos mudaram desde o último cálculo — clique de novo para atualizar.")
+                else:
+                    st.pyplot(plot_shap_bar(st.session_state["xgboost_shap_df"]), width="stretch")
+                    st.caption(
+                        "TreeSHAP aplicado sobre o XGBoost treinado no mesmo paciente simulado — permite "
+                        "comparar quais variáveis cada algoritmo pondera mais."
+                    )
 
     st.header("Resumo interpretativo")
 
