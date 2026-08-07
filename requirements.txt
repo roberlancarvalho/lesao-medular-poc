@@ -1,13 +1,13 @@
-streamlit
-numpy
-pandas
-matplotlib
-pillow
-pydicom
-requests
-kaggle
-scikit-learn
-shap
-xgboost
-opencv-python
-tensorflow; python_version < "3.13"
+streamlit==1.59.1
+numpy==2.4.4
+pandas==3.0.1
+matplotlib==3.10.8
+pillow==12.1.1
+pydicom==3.0.2
+requests==2.34.2
+kaggle==2.2.3
+scikit-learn==1.8.0
+shap==0.52.0
+xgboost==3.4.0
+opencv-python==5.0.0.93
+tensorflow==2.21.0; python_version < "3.14"

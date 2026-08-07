@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.11/3.12 instalam o backend visual real (TensorFlow/ResNet50/Grad-CAM).
-        # 3.13 valida o fallback simulado, já que o TensorFlow ainda não tem build
+        # 3.11/3.12/3.13 instalam o backend visual real (TensorFlow/ResNet50/Grad-CAM).
+        # 3.14 valida o fallback simulado, já que o TensorFlow ainda não tem build
         # oficial para essa versão (ver requirements.txt e README).
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout

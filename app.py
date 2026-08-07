@@ -161,17 +161,40 @@ def save_app_config(config: dict) -> None:
         json.dump(config, file, indent=2, ensure_ascii=False)
 
 
-def persist_execution_report(report_payload: dict) -> Path:
+def persist_execution_report(
+    report_payload: dict,
+    embedding=None,
+    timestamp: datetime | None = None,
+) -> Path:
     """
     Salva o relatório técnico da execução em reports/, além do download manual.
 
     Reforça a rastreabilidade experimental discutida na Seção 3.1.2 do artigo:
     cada execução vira um artefato versionável em disco, não só um payload de sessão.
+
+    Quando `embedding` (vetor real da ResNet50) é informado, também é salvo em
+    reports/embeddings/, e seu caminho é registrado em report_payload["embedding_path"]
+    — viabiliza a auditoria de embeddings mencionada na Seção 3.1 do artigo.
     """
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_relatorio_execucao.json"
-    report_path = REPORTS_DIR / filename
+    stamp = (timestamp or datetime.now()).strftime("%Y%m%d-%H%M%S")
 
+    if embedding is not None:
+        embeddings_dir = REPORTS_DIR / "embeddings"
+        embeddings_dir.mkdir(parents=True, exist_ok=True)
+        embedding_path = embeddings_dir / f"{stamp}_embedding.json"
+        with embedding_path.open("w", encoding="utf-8") as file:
+            json.dump(
+                {"dim": int(len(embedding)), "embedding": [float(x) for x in embedding]},
+                file,
+            )
+        report_payload["embedding_path"] = embedding_path.as_posix()
+        report_payload["embedding_dim"] = int(len(embedding))
+    else:
+        report_payload["embedding_path"] = None
+        report_payload["embedding_dim"] = None
+
+    report_path = REPORTS_DIR / f"{stamp}_relatorio_execucao.json"
     with report_path.open("w", encoding="utf-8") as file:
         json.dump(report_payload, file, indent=2, ensure_ascii=False)
 
@@ -800,11 +823,15 @@ def _fallback_anomaly_score(image: Image.Image) -> float:
     return float(np.clip(raw_score * 1.8, 0.05, 0.95))
 
 
-def simulate_anomaly_score(image: Image.Image) -> float:
+def simulate_anomaly_score(image: Image.Image) -> tuple[float, np.ndarray | None]:
     """
     Calcula escore de anomalia com ResNet50 + Isolation Forest reais.
 
-    Mantive o nome da função para preservar chamadas existentes da interface.
+    Retorna (escore, embedding). O embedding real (2048-d) é devolvido para que o
+    chamador possa persisti-lo e viabilizar a auditoria mencionada na Seção 3.1 do
+    artigo ("rastreabilidade analítica, que permite auditar embeddings..."). Quando o
+    backend real falha (ex.: TensorFlow indisponível), o embedding retorna None e o
+    escore vem do fallback heurístico.
     """
     try:
         embedding = extract_resnet_embedding(image)
@@ -813,9 +840,9 @@ def simulate_anomaly_score(image: Image.Image) -> float:
         raw_score = float(-model.score_samples(embedding_scaled)[0])
         denominator = max(q95 - q05, 1e-8)
         normalized_score = (raw_score - q05) / denominator
-        return float(np.clip(normalized_score, 0.01, 0.99))
+        return float(np.clip(normalized_score, 0.01, 0.99)), embedding
     except Exception:
-        return _fallback_anomaly_score(image)
+        return _fallback_anomaly_score(image), None
 
 
 def fuzzy_anomaly(score: float) -> dict:
@@ -842,6 +869,17 @@ def fuzzy_anomaly(score: float) -> dict:
         label = "Severo"
 
     return {"label": label, "memberships": memberships}
+
+
+def fuzzy_label_to_ordinal(label: str) -> float:
+    """
+    Codifica a categoria fuzzy como atributo ordinal (0.0 Leve / 0.5 Moderado / 1.0 Severo).
+
+    A Seção 3.3 do artigo descreve que "o escore visual resumido e sua categoria fuzzy
+    passam a atuar como atributo adicional" no Módulo 2 — ou seja, a categoria fuzzy em si
+    (não só o escore contínuo que a origina) deve influenciar o modelo tabular.
+    """
+    return {"Leve": 0.0, "Moderado": 0.5, "Severo": 1.0}[label]
 
 
 def classify_visual_only_risk(fuzzy_label: str) -> str:
@@ -927,6 +965,10 @@ def _build_synthetic_clinical_dataset():
     time_norm = days_since_trauma / 365.0
 
     anomaly_score = np.clip(rng.beta(a=2.0, b=3.0, size=n_samples) + rng.normal(0, 0.08, size=n_samples), 0, 1)
+    fuzzy_ordinal = np.array(
+        [fuzzy_label_to_ordinal(fuzzy_anomaly(score)["label"]) for score in anomaly_score],
+        dtype=np.float32,
+    )
 
     latent = (
         -1.10
@@ -952,6 +994,7 @@ def _build_synthetic_clinical_dataset():
             "Idade": age.astype(float),
             "Tempo desde o Trauma (dias)": days_since_trauma.astype(float),
             "Características da MRI": anomaly_score.astype(float),
+            "Categoria Fuzzy (ordinal)": fuzzy_ordinal,
         }
     )
     return X, target
@@ -1026,6 +1069,7 @@ def build_patient_features(
             "Idade": [float(age)],
             "Tempo desde o Trauma (dias)": [float(days_since_trauma)],
             "Características da MRI": [float(anomaly_score)],
+            "Categoria Fuzzy (ordinal)": [fuzzy_label_to_ordinal(fuzzy_anomaly(anomaly_score)["label"])],
         }
     )
 
@@ -1129,7 +1173,8 @@ def compare_tree_models_backend() -> dict:
     return results
 
 
-def simulate_shap_importance(
+def _simulate_shap_importance(
+    model_backend,
     asia: str,
     uems: int,
     lems: int,
@@ -1139,7 +1184,9 @@ def simulate_shap_importance(
     anomaly_score: float,
 ) -> pd.DataFrame:
     """
-    Calcula valores SHAP reais para o paciente específico.
+    Calcula valores SHAP reais para o paciente específico, sobre o modelo retornado
+    por `model_backend` (Random Forest ou XGBoost — ambos suportados pelo TreeSHAP,
+    como descrito na Seção 3.3 do artigo).
 
     Retorna DataFrame no mesmo formato que a interface já usa.
     """
@@ -1147,7 +1194,7 @@ def simulate_shap_importance(
     try:
         if not SHAP_AVAILABLE:
             raise ModelBackendError("SHAP não está instalado. Rode: py -m pip install shap")
-        model, _, _ = train_multimodal_classifier_backend()
+        model, _, _ = model_backend()
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(patient_X)
 
@@ -1181,12 +1228,43 @@ def simulate_shap_importance(
             "Idade": 0.10 + 0.05 * (age / 90.0),
             "Tempo desde o Trauma (dias)": 0.10 + 0.05 * (days_since_trauma / 365.0),
             "Características da MRI": 0.25 + 0.40 * anomaly_score,
+            "Categoria Fuzzy (ordinal)": 0.15 + 0.20 * fuzzy_label_to_ordinal(fuzzy_anomaly(anomaly_score)["label"]),
         }
         total = sum(weights.values())
         df = pd.DataFrame(
             [{"Variável": key, "Peso relativo": value / total, "Valor SHAP": value} for key, value in weights.items()]
         )
         return df.sort_values("Peso relativo", ascending=True)
+
+
+def simulate_shap_importance(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> pd.DataFrame:
+    """SHAP real sobre o Random Forest. Mantive o nome para não alterar a interface."""
+    return _simulate_shap_importance(
+        train_multimodal_classifier_backend, asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score
+    )
+
+
+def simulate_shap_importance_xgboost(
+    asia: str,
+    uems: int,
+    lems: int,
+    age: int,
+    neuro_level: str,
+    days_since_trauma: int,
+    anomaly_score: float,
+) -> pd.DataFrame:
+    """SHAP real sobre o XGBoost, para complementar a comparação com o Random Forest."""
+    return _simulate_shap_importance(
+        train_xgboost_backend, asia, uems, lems, age, neuro_level, days_since_trauma, anomaly_score
+    )
 
 
 def plot_shap_bar(df: pd.DataFrame):
@@ -1795,7 +1873,7 @@ except Exception as exc:
 should_run_analysis = run_analysis or bool(config.get("enable_auto_analysis", True))
 
 if should_run_analysis and image is not None:
-    anomaly_score = simulate_anomaly_score(image)
+    anomaly_score, mri_embedding = simulate_anomaly_score(image)
     fuzzy_result = fuzzy_anomaly(anomaly_score)
     fuzzy_label = fuzzy_result["label"]
     memberships = fuzzy_result["memberships"]
@@ -2022,6 +2100,22 @@ if should_run_analysis and image is not None:
             metrics_df = pd.DataFrame(metrics).T
             st.dataframe(metrics_df.style.format("{:.3f}"), width="stretch")
 
+        with st.expander("Explicabilidade SHAP do XGBoost (complementa o SHAP do Random Forest acima)", expanded=False):
+            xgboost_shap_df = simulate_shap_importance_xgboost(
+                asia=asia_scale,
+                uems=uems,
+                lems=lems,
+                age=age,
+                neuro_level=neuro_level,
+                days_since_trauma=days_since_trauma,
+                anomaly_score=anomaly_score,
+            )
+            st.pyplot(plot_shap_bar(xgboost_shap_df), width="stretch")
+            st.caption(
+                "TreeSHAP aplicado sobre o XGBoost treinado no mesmo paciente simulado — permite "
+                "comparar quais variáveis cada algoritmo pondera mais."
+            )
+
     st.header("Resumo interpretativo")
 
     if probability >= 0.70:
@@ -2047,8 +2141,9 @@ if should_run_analysis and image is not None:
 
     st.header("Relatório técnico da execução")
 
+    execution_timestamp = datetime.now()
     report_payload = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "timestamp": execution_timestamp.isoformat(timespec="seconds"),
         "app_version": APP_VERSION,
         "image_origin": image_origin_label,
         "data_source": data_source,
@@ -2068,7 +2163,9 @@ if should_run_analysis and image is not None:
         "prototype_warning": "Resultados simulados, sem validade clínica.",
     }
 
-    saved_report_path = persist_execution_report(report_payload)
+    saved_report_path = persist_execution_report(
+        report_payload, embedding=mri_embedding, timestamp=execution_timestamp
+    )
 
     report_col_1, report_col_2 = st.columns([1, 1])
 
@@ -2084,6 +2181,16 @@ if should_run_analysis and image is not None:
             width="stretch",
         )
         st.caption(f"Também salvo automaticamente em `{saved_report_path.as_posix()}`.")
+        if report_payload["embedding_path"]:
+            st.caption(
+                f"Embedding real da ResNet50 (2048-d) auditável em "
+                f"`{report_payload['embedding_path']}`."
+            )
+        else:
+            st.caption(
+                "Embedding real não disponível nesta execução (backend visual em modo "
+                "simulado/fallback) — nada foi salvo em reports/embeddings/."
+            )
 
         st.markdown(
             """

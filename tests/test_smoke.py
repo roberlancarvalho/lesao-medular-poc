@@ -71,6 +71,46 @@ def test_multimodal_risk_scenario_from_article(app_module):
 
 def test_report_persistence(app_module, tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "REPORTS_DIR", tmp_path)
-    saved_path = app_module.persist_execution_report({"teste": True})
+    payload = {"teste": True}
+    saved_path = app_module.persist_execution_report(payload)
     assert saved_path.exists()
     assert saved_path.parent == tmp_path
+    assert payload["embedding_path"] is None
+
+
+def test_report_persistence_with_embedding(app_module, tmp_path, monkeypatch):
+    """O embedding real da ResNet50 deve ser salvo à parte e referenciado no relatório."""
+    import numpy as np
+
+    monkeypatch.setattr(app_module, "REPORTS_DIR", tmp_path)
+    payload = {"teste": True}
+    fake_embedding = np.zeros(2048, dtype=np.float32)
+
+    saved_path = app_module.persist_execution_report(payload, embedding=fake_embedding)
+
+    assert saved_path.exists()
+    assert payload["embedding_dim"] == 2048
+    embedding_path = tmp_path / "embeddings" / Path(payload["embedding_path"]).name
+    assert embedding_path.exists()
+
+
+def test_synthetic_dataset_includes_fuzzy_category(app_module):
+    """A categoria fuzzy deve entrar como atributo do modelo, não só o escore contínuo (Seção 3.3)."""
+    X, _ = app_module._build_synthetic_clinical_dataset()
+    assert "Categoria Fuzzy (ordinal)" in X.columns
+
+
+def test_patient_features_include_fuzzy_category(app_module):
+    patient_X = app_module.build_patient_features(
+        asia="A", uems=2, lems=1, age=55, neuro_level="C5",
+        days_since_trauma=20, anomaly_score=0.10,
+    )
+    assert patient_X["Categoria Fuzzy (ordinal)"].iloc[0] == 0.0  # "Leve"
+
+
+def test_xgboost_shap_importance_runs(app_module):
+    shap_df = app_module.simulate_shap_importance_xgboost(
+        asia="C", uems=25, lems=25, age=40, neuro_level="C6",
+        days_since_trauma=30, anomaly_score=0.2,
+    )
+    assert "Categoria Fuzzy (ordinal)" in shap_df["Variável"].values

@@ -51,11 +51,11 @@ demonstração.
 
 ## Pré-requisitos
 
-- **Python 3.10 a 3.12** (recomendado) para ter o backend visual real com **ResNet50/Grad-CAM**
-  instalado automaticamente. Em **Python 3.13/3.14** o app continua funcionando normalmente
-  (fuzzy, Random Forest, XGBoost, SHAP, Isolation Forest, leitura de DICOM), mas usando o
-  heatmap visual simulado como substituto do Grad-CAM real, pois o TensorFlow ainda não
-  possui build oficial para essas versões do Python.
+- **Python 3.10 a 3.13** (recomendado) para ter o backend visual real com **ResNet50/Grad-CAM**
+  instalado automaticamente. Em **Python 3.14** o app continua funcionando normalmente (fuzzy,
+  Random Forest, XGBoost, SHAP, Isolation Forest, leitura de DICOM), mas usando o heatmap
+  visual simulado como substituto do Grad-CAM real, pois o TensorFlow ainda não possui build
+  oficial para essa versão do Python.
 - pip atualizado.
 - (Opcional) Conta no [Kaggle](https://www.kaggle.com/) com API Key, caso queira baixar o
   dataset RSNA diretamente pela interface.
@@ -80,12 +80,12 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-O arquivo `requirements.txt` cobre o pipeline completo (Streamlit, scikit-learn,
-XGBoost, SHAP, OpenCV, pydicom, kaggle, TensorFlow, etc.). O TensorFlow é instalado
-**automaticamente por padrão em Python 3.10, 3.11 e 3.12** (marcador `python_version < "3.13"`
-no requirements). Em **Python 3.13/3.14** o `pip install` pula o TensorFlow — ainda não há
-build oficial dele para essas versões — e o app cai automaticamente no heatmap visual
-simulado como substituto do Grad-CAM real.
+O arquivo `requirements.txt` cobre o pipeline completo, com **todas as versões fixadas**
+(Streamlit, scikit-learn, XGBoost, SHAP, OpenCV, pydicom, kaggle, TensorFlow, etc.), conforme
+a Seção 3.1.2 do artigo. O TensorFlow é instalado **automaticamente em Python 3.10 a 3.13**
+(marcador `python_version < "3.14"` no requirements). Em **Python 3.14** o `pip install` pula
+o TensorFlow — ainda não há build oficial dele para essa versão — e o app cai automaticamente
+no heatmap visual simulado como substituto do Grad-CAM real.
 
 ## Executando a aplicação
 
@@ -115,9 +115,12 @@ em Configurações). A tela principal mostra, em sequência:
 4. **Módulo 2 (predição clínica)**: as variáveis EMSCI usadas (ASIA, nível neurológico,
    UEMS/LEMS, idade, tempo desde o trauma), o gráfico de probabilidade e a explicabilidade
    SHAP.
-5. **Comparação Random Forest vs XGBoost**, com métricas de acurácia/AUC em holdout sintético.
+5. **Comparação Random Forest vs XGBoost**, com métricas de acurácia/AUC em holdout sintético
+   e explicabilidade SHAP para os dois modelos.
 6. **Relatório técnico**: JSON com todos os parâmetros e saídas da execução, disponível para
-   download e também salvo automaticamente em `reports/`.
+   download e também salvo automaticamente em `reports/`. Quando o backend visual real está
+   ativo, o embedding da ResNet50 (2048-d) também é salvo em `reports/embeddings/` e referenciado
+   no relatório (`embedding_path`), para auditoria posterior.
 
 Para reproduzir o cenário de desacoplamento descrito no artigo (imagem "leve" não implica
 risco baixo), tente **Escala ASIA A**, **UEMS/LEMS próximos de 0** e uma imagem com escore de
@@ -188,7 +191,7 @@ neste repositório cobrindo:
 ### CI — verificação automática (GitHub Actions)
 
 A cada `push`/pull request na branch `main`, o workflow em
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda em Python 3.11, 3.12 e 3.13
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda em Python 3.11, 3.12, 3.13 e 3.14
 (matriz), fazendo:
 
 1. `python -m py_compile app.py` — garante que o arquivo não tem erro de sintaxe.
@@ -197,7 +200,7 @@ A cada `push`/pull request na branch `main`, o workflow em
    XGBoost, o combinador de Risco Multimodal e a persistência do relatório (ver
    [`tests/test_smoke.py`](tests/test_smoke.py)).
 
-A versão 3.13 na matriz também serve para garantir que o **fallback sem TensorFlow** (heatmap
+A versão 3.14 na matriz também serve para garantir que o **fallback sem TensorFlow** (heatmap
 simulado no lugar do Grad-CAM real) continua funcionando, já que o `requirements.txt` pula o
 TensorFlow nessa versão do Python.
 
@@ -219,9 +222,11 @@ workflow de CD no GitHub Actions, só da configuração inicial abaixo:
 1. Acesse [share.streamlit.io](https://share.streamlit.io/), entre com sua conta GitHub e
    clique em **"New app"**.
 2. Selecione o repositório `lesao-medular-poc`, a branch `main` e o arquivo principal `app.py`.
-3. Em **"Advanced settings"**, defina a versão do Python como **3.11 ou 3.12** — é o que faz o
-   `requirements.txt` instalar o TensorFlow de verdade (backend visual real do Grad-CAM). Em
-   Python 3.13 o deploy funciona, mas cai no fallback simulado.
+3. Em **"Advanced settings"**, defina a versão do Python como **3.11, 3.12 ou 3.13** (o que
+   estiver disponível no seletor do Streamlit Cloud) — é o que faz o `requirements.txt`
+   instalar o TensorFlow de verdade (backend visual real do Grad-CAM). Se o seletor só oferecer
+   uma versão mais nova sem TensorFlow disponível ainda, o deploy funciona do mesmo jeito, só
+   cai no fallback simulado.
 4. Clique em **"Deploy"**. Qualquer novo `push` na `main` reimplanta automaticamente.
 
 **Duas observações importantes para essa PoC especificamente:**
@@ -245,7 +250,7 @@ requirements.txt              # dependências do pipeline (nome exigido pelo Str
 docs/screenshots/             # imagens usadas no README
 .streamlit/                   # config local e credenciais (gerado em tempo de execução, não versionado)
 data/                         # dataset local (não versionado)
-reports/                      # relatórios JSON gerados a cada execução (não versionado)
+reports/                      # relatórios JSON + reports/embeddings/ (não versionado)
 ```
 
 ## Maturidade científica do protótipo
@@ -254,12 +259,14 @@ reports/                      # relatórios JSON gerados a cada execução (não
 |---|---|
 | Leitura real de DICOM | ✅ Implementado |
 | Interface clínica demonstrativa | ✅ Implementado |
-| Embeddings ResNet50 + Grad-CAM | ✅ Real (TensorFlow instalado por padrão em Python <3.13); fallback simulado em Python 3.13/3.14 |
+| Embeddings ResNet50 + Grad-CAM | ✅ Real (TensorFlow instalado por padrão em Python 3.10–3.13); fallback simulado em Python 3.14 |
+| Embeddings auditáveis | ✅ Persistidos em `reports/embeddings/` a cada execução real, referenciados no relatório JSON |
 | Isolation Forest | ✅ Real (requer scikit-learn + embeddings) |
-| Lógica fuzzy | ✅ Implementado (heurística) |
+| Lógica fuzzy | ✅ Implementado (heurística); categoria fuzzy também entra como atributo do modelo tabular (não só o escore contínuo) |
 | Predição clínica (Random Forest) | ✅ Real, treinado em dados **sintéticos** |
 | Predição clínica (XGBoost, comparação) | ✅ Real (requer pacote `xgboost`), treinado em dados **sintéticos** |
-| SHAP | ✅ Real (requer pacote `shap`); fallback heurístico quando indisponível |
+| SHAP | ✅ Real sobre Random Forest **e** XGBoost (requer pacote `shap`); fallback heurístico quando indisponível |
+| Dependências fixadas | ✅ `requirements.txt` com versões exatas (`==`), testadas em conjunto |
 
 **Limitação importante:** o dataset usado (RSNA 2024 Lumbar Spine Degenerative
 Classification) serve para validar tecnicamente o pipeline com imagens DICOM reais, mas
