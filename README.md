@@ -1,19 +1,60 @@
-# Sistema Experimental — Pipeline Multimodal para Prognóstico de Lesão Medular por MRI
+# Pipeline Multimodal para Prognóstico de Lesão Medular com Inteligência Artificial
+
+### Uma Arquitetura Baseada em Visão Computacional e Dados Clínicos
 
 [![CI](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml/badge.svg)](https://github.com/roberlancarvalho/lesao-medular-poc/actions/workflows/ci.yml)
 
-**Demo pública:** [lesao-medular-poc.streamlit.app](https://lesao-medular-poc.streamlit.app/)
+**Demo pública:** [lesao-medular-poc.streamlit.app](https://lesao-medular-poc.streamlit.app/) ·
+**Artigo (PDF):** [PDF/pipeline-multimodal-lesao-medular.pdf](PDF/pipeline-multimodal-lesao-medular.pdf) ·
+**Apresentação (PPT/PDF):** [PPT/apresentacao-pipeline-multimodal-lesao-medular.pdf](PPT/apresentacao-pipeline-multimodal-lesao-medular.pdf)
+
+## Sumário
+
+- [Autoria](#autoria)
+- [Resumo](#resumo)
+- [Capturas de tela](#capturas-de-tela)
+- [Arquitetura](#arquitetura)
+- [Funcionalidades](#funcionalidades)
+- [Instalação e execução](#pré-requisitos)
+- [Como interpretar os resultados](#como-interpretar-os-resultados)
+- [CI/CD](#cicd)
+- [Estrutura do projeto](#estrutura-do-projeto)
+- [Maturidade científica do protótipo](#maturidade-científica-do-protótipo)
+- [Licença](#licença)
+- [Como citar este repositório](#como-citar-este-repositório)
+- [Uso de Inteligência Artificial Generativa](#uso-de-inteligência-artificial-generativa)
+- [Referências](#referências)
+
+## Autoria
+
+- **Autor:** Roberlan Oliveira de Carvalho ([roberlan.carvalho@gmail.com](mailto:roberlan.carvalho@gmail.com))
+- **Programa:** Programa de Pós-Graduação em Informática, Universidade Federal do Rio de Janeiro (UFRJ)
+- **Orientação:** trabalho sem orientador formal associado.
 
 > **Aviso acadêmico:** este é um protótipo (PoC) experimental. Ele **não realiza diagnóstico
 > nem prognóstico clínico real**. Os módulos de machine learning existem para demonstrar
 > arquitetura, integração multimodal e explicabilidade — não possuem validade clínica.
 
-Aplicação [Streamlit](https://streamlit.io/) que integra leitura de imagens de MRI/DICOM,
-dados clínicos simulados inspirados no protocolo EMSCI (Escala ASIA, força motora por
-miótomos-chave UEMS/LEMS, nível neurológico, idade, tempo desde o trauma), explicabilidade
-visual (Grad-CAM), lógica fuzzy, um classificador de anomalia visual (Isolation Forest sobre
-embeddings de ResNet50) e um modelo clínico (Random Forest + XGBoost, com SHAP) para gerar
-uma probabilidade simulada de recuperação motora e um Risco Multimodal explícito.
+## Resumo
+
+Este trabalho propõe uma Prova de Conceito (PoC) de uma arquitetura multimodal de
+Inteligência Artificial para apoio ao prognóstico de recuperação motora em lesão medular
+traumática. A proposta integra imagens de ressonância magnética (MRI) no padrão *Digital
+Imaging and Communications in Medicine* (DICOM) e dados clínicos estruturados, como escala
+ASIA e força motora. O pipeline organiza-se em dois módulos: visão computacional, com
+extração de representações por ResNet50, detecção de anomalias por Isolation Forest e
+interpretação por lógica fuzzy; e predição clínica multimodal, baseada em modelos de árvores,
+como Random Forest e XGBoost. A explicabilidade é apoiada por Grad-CAM e SHAP. A PoC combina
+imagens DICOM reais com dados clínicos sintéticos, demonstrando viabilidade técnica inicial,
+sem validade clínica, dependente de dados longitudinais reais.
+
+**Palavras-chave:** Lesão Medular; Inteligência Artificial Explicável; Aprendizado Multimodal;
+Visão Computacional; Lógica Fuzzy.
+
+Este repositório é o protótipo de software (PoC) descrito no artigo acima — o app Streamlit
+descrito a seguir implementa a arquitetura de dois módulos, a camada fuzzy e a explicabilidade
+(Grad-CAM + SHAP) discutidas no texto completo, disponível em
+[`PDF/pipeline-multimodal-lesao-medular.pdf`](PDF/pipeline-multimodal-lesao-medular.pdf).
 
 ## Capturas de tela
 
@@ -33,6 +74,55 @@ com o quadro clínico:
 > Escala ASIA A, força motora baixa) mesmo com uma MRI classificada como "Leve", o painel
 > destaca a divergência com um aviso — evidenciando que o Risco Multimodal pondera o contexto
 > clínico em vez de replicar diretamente o sinal da imagem.
+
+## Arquitetura
+
+A arquitetura (detalhada na Seção 3 do artigo) organiza-se em dois módulos integrados, numa
+fusão tardia em nível tabular — não uma fusão fim a fim opaca — favorecendo desacoplamento
+funcional, reprodutibilidade computacional e rastreabilidade analítica:
+
+```text
+┌─────────────────────────────┐      ┌──────────────────────────────────┐
+│  Módulo 1 — Visão            │      │  Módulo 2 — Predição Clínica      │
+│  Computacional                │      │  Multimodal                       │
+│                               │      │                                    │
+│  MRI/DICOM (RSNA 2024)       │      │  Escala ASIA · Força Motora        │
+│        │                     │      │  (UEMS/LEMS) · Nível Neurológico   │
+│        ▼                     │      │  · Idade · Tempo desde o Trauma    │
+│  Pré-processamento           │      │        │                           │
+│  (leitura DICOM + normaliz.) │      │        ▼                           │
+│        │                     │      │  Fusão tabular tardia              │
+│        ▼                     │      │  (+ escore MRI e categoria fuzzy)  │
+│  ResNet50 pré-treinada       │─────▶│        │                           │
+│  (extração de embeddings)    │ escore│        ▼                          │
+│        │            ┌────────┘ MRI  │  Random Forest / XGBoost           │
+│        ▼            │              │  (modelo preditivo tabular)         │
+│  Isolation Forest    │ Grad-CAM     │        │                           │
+│  (anomalia visual)   │ (explicab.   │        ▼                           │
+│        │             │  visual)     │  Probabilidade de recuperação      │
+│        ▼             │              │  motora em 1 ano                   │
+│  Lógica Fuzzy         │              │        │                           │
+│  (Leve/Moderada/      │              │        ▼                          │
+│   Severa)             │              │  Risco Multimodal ─── SHAP         │
+└───────────────────────┘              └────────────────────────────────────┘
+```
+
+- **Módulo 1** recebe a MRI, extrai atributos visuais por transferência de aprendizado
+  (ResNet50), identifica padrões anômalos com Isolation Forest (algoritmo não supervisionado)
+  e traduz o escore contínuo em categoria linguística de incerteza via lógica fuzzy (Anomalia
+  Leve/Moderada/Severa). O Grad-CAM explica espacialmente onde a rede concentrou ativação.
+- **Módulo 2** integra esse escore (+ sua categoria fuzzy) a variáveis clínicas inspiradas no
+  protocolo EMSCI e gera a predição de recuperação motora com modelos baseados em árvores
+  (Random Forest e XGBoost), explicados por SHAP (TreeSHAP).
+- **Desacoplamento funcional**: a classificação fuzzy do Módulo 1 depende só dos pixels da
+  imagem; o Módulo 2 pondera esse sinal junto ao quadro clínico numa fusão tardia — por isso
+  uma MRI "Leve" pode coexistir com "Alto Risco Multimodal" quando o quadro clínico é grave
+  (ver bloco de desacoplamento nas capturas de tela acima e a Seção 3.3 do artigo).
+
+Este README documenta a implementação de software (o app Streamlit); a arquitetura conceitual
+completa — incluindo a Figura 1 original, a discussão de proveniência de dados (Seção 3.1.1) e
+a análise comparativa com trabalhos relacionados (Seção 2) — está no
+[artigo em PDF](PDF/pipeline-multimodal-lesao-medular.pdf).
 
 ## Funcionalidades
 
@@ -248,14 +338,24 @@ reimplantado automaticamente a cada push na `main`.
 ## Estrutura do projeto
 
 ```text
-app.py                        # aplicação Streamlit (ponto de entrada único, concentra todo o pipeline)
+app.py                        # aplicação Streamlit (ponto de entrada único, concentra todo o pipeline) — CÓDIGO
 requirements.txt              # dependências do pipeline (nome exigido pelo Streamlit Community Cloud)
+tests/                        # smoke tests automatizados (pytest) — CÓDIGO
 .github/workflows/ci.yml      # CI: lint + smoke test a cada push/PR
-docs/screenshots/             # imagens usadas no README
+PDF/                          # artigo completo em PDF
+PPT/                          # apresentação (slides) em PDF
+docs/screenshots/             # imagens/capturas de tela usadas no README — IMAGENS
 .streamlit/                   # config local e credenciais (gerado em tempo de execução, não versionado)
-data/                         # dataset local (não versionado)
+data/                         # dataset local (RSNA, baixado via Kaggle) — DATA (não versionado)
 reports/                      # relatórios JSON + reports/embeddings/ (não versionado)
 ```
+
+> **Nota sobre nomenclatura:** este repositório usa `app.py`/`tests/` como código (em vez de
+> uma pasta `CODIGO/`) porque o Streamlit Community Cloud e o GitHub Actions exigem esses
+> arquivos em locais específicos da raiz do projeto para funcionar (deploy automático e CI).
+> Da mesma forma, `data/` não é versionado por conter apenas um dataset público de terceiros
+> (RSNA/Kaggle, baixado sob demanda — ver seção "Configurando o dataset" abaixo) e nenhum dado
+> foi coletado como parte deste trabalho.
 
 ## Maturidade científica do protótipo
 
@@ -280,5 +380,135 @@ diagnóstica ou prognóstica.
 
 ## Licença
 
-Defina a licença do projeto antes de publicar (ex.: MIT, Apache-2.0). Nenhuma licença está
-definida por padrão neste repositório.
+Este repositório está licenciado sob a **Licença MIT** — veja o arquivo
+[`LICENSE`](LICENSE) para o texto completo. Em resumo: uso, cópia, modificação e distribuição
+são livres, inclusive para fins comerciais, desde que o aviso de copyright original seja
+mantido. O código é fornecido "como está", sem garantias — o que é especialmente relevante
+dado o aviso acadêmico no topo deste README (resultados simulados, sem validade clínica).
+
+## Como citar este repositório
+
+Se este repositório ou o artigo associado forem úteis para seu trabalho, a referência
+sugerida (formato ABNT, mesmo usado pelo próprio artigo para autocitação) é:
+
+```
+CARVALHO, R. O. lesao-medular-poc: repositório do protótipo experimental do Pipeline
+Multimodal para Prognóstico de Lesão Medular. GitHub, 2026. Disponível em:
+https://github.com/roberlancarvalho/lesao-medular-poc. Acesso em: [data de acesso].
+```
+
+Para citar o artigo em si:
+
+```
+CARVALHO, R. O. Pipeline Multimodal para Prognóstico de Lesão Medular com Inteligência
+Artificial: Uma Arquitetura Baseada em Visão Computacional e Dados Clínicos. Programa de
+Pós-Graduação em Informática, Universidade Federal do Rio de Janeiro (UFRJ), 2026.
+```
+
+BibTeX:
+
+```bibtex
+@misc{carvalho2026lesaomedularpoc,
+  author = {Carvalho, Roberlan Oliveira de},
+  title  = {Pipeline Multimodal para Prognóstico de Lesão Medular com Inteligência
+            Artificial: Uma Arquitetura Baseada em Visão Computacional e Dados Clínicos},
+  year   = {2026},
+  howpublished = {\url{https://github.com/roberlancarvalho/lesao-medular-poc}},
+  note   = {Programa de Pós-Graduação em Informática, UFRJ}
+}
+```
+
+## Uso de Inteligência Artificial Generativa
+
+Conforme declarado na Seção "Conclusão e Trabalhos Futuros" do
+[artigo](PDF/pipeline-multimodal-lesao-medular.pdf):
+
+> "Ferramentas de IA generativa, especificamente o OpenAI Codex e o Claude Code (Anthropic),
+> foram utilizadas como apoio colaborativo no processo de engenharia de software, incluindo a
+> implementação da interface gráfica e a orquestração de código. Todas as decisões
+> metodológicas, curadoria bibliográfica, validação técnica e revisão final permaneceram sob
+> responsabilidade do autor."
+
+Detalhando o que isso significou na prática, neste repositório especificamente:
+
+- **Implementação de código:** grande parte do `app.py` (módulos de visão computacional,
+  predição clínica, explicabilidade, persistência de relatórios/embeddings, testes em
+  `tests/test_smoke.py` e o workflow de CI em `.github/workflows/ci.yml`) foi escrita com
+  apoio do **Claude Code** (Anthropic), em pares com o autor — incluindo depuração de
+  incompatibilidades de dependências e correção de erros de sintaxe/CI.
+- **Interface gráfica:** a interface Streamlit (layout, componentes de carregamento
+  `st.status`/`st.skeleton`, textos de interpretação exibidos ao usuário) foi implementada com
+  apoio de IA generativa e revisada pelo autor.
+- **Documentação:** este README (estrutura, texto explicativo) foi organizado com apoio de IA
+  generativa a partir do conteúdo do artigo e das decisões tomadas pelo autor.
+
+**Nota:** a concepção conceitual da pesquisa (o problema a resolver, a escolha da arquitetura
+em dois módulos, a camada fuzzy como diferencial metodológico, a curadoria bibliográfica e a
+interpretação crítica das limitações científicas do protótipo — Tabela 2 do artigo) foi de
+autoria inteiramente humana. A IA generativa funcionou como ferramenta de engenharia de
+software sobre decisões já definidas pelo autor, não como autora do conteúdo científico.
+
+## Referências
+
+Bibliografia citada no artigo associado a este repositório:
+
+- CAI, L.; BAI, R.; CAO, Q.; SUN, W.; WANG, F.; LIU, X.; LIANG, B.; JIANG, M.; WANG, G.; SHAO,
+  Q.; JIANG, X.; WANG, C.; CHEN, C.; TAN, Z.; WU, Q.; BAO, M.; YU, H.; LI, P.; YANG, X.; LU, Q.
+  A non-invasive MRI-based multimodal fusion deep learning model (MF-DLM) for predicting
+  overall survival in bladder cancer: a multicentre retrospective study. *eClinicalMedicine*,
+  v. 90, art. 103640, 2025. Disponível em:
+  [linkinghub.elsevier.com/retrieve/pii/S2589537025005747](https://linkinghub.elsevier.com/retrieve/pii/S2589537025005747).
+- CARVALHO, R. O. lesao-medular-poc: repositório do protótipo experimental do Pipeline
+  Multimodal para Prognóstico de Lesão Medular. GitHub, 2026. Disponível em:
+  [github.com/roberlancarvalho/lesao-medular-poc](https://github.com/roberlancarvalho/lesao-medular-poc).
+- DEVI, S. R.; JUSTUS, J. J.; VANATHI, M.; VEERAMALLU, B.; ARUNA, V.; MANJUNATH, T. C.;
+  SAPAYEV, V. O. U.; BANU, S. An Explainable Machine Learning Model for Early Detection of
+  Brain Tumors: Integrating Multi-Modal Medical Imaging and Intelligent Feature Fusion.
+  *Engineering, Technology & Applied Science Research*, v. 15, n. 5, p. 26448-26453, 2025.
+  Disponível em:
+  [etasr.com/index.php/ETASR/article/view/11539](https://etasr.com/index.php/ETASR/article/view/11539).
+- EMSCI — EUROPEAN MULTICENTER STUDY ABOUT SPINAL CORD INJURY. About EMSCI. 2024. Disponível
+  em: [emsci.org](https://www.emsci.org/).
+- GILL, S. S.; PONNIAH, H. S.; GIERSZTEIN, S.; ANANTHARAJ, R. M.; NAMIREDDY, S.; KILLILEA, J.;
+  RAMSAY, D. S. C.; SALIH, A.; THAVARAJASINGAM, A.; SCURTU, D.; JANKOVIC, D.; RUSSO, S.;
+  KRAMER, A.; THAVARAJASINGAM, S. G. The diagnostic and prognostic capability of artificial
+  intelligence in spinal cord injury: A systematic review. *Brain and Spine*, v. 5, art.
+  104208, 2025. Disponível em:
+  [pmc.ncbi.nlm.nih.gov/articles/PMC11871462](https://pmc.ncbi.nlm.nih.gov/articles/PMC11871462/).
+- KRONES, F.; MARIKKAR, U.; PARSONS, G.; SZMUL, A.; MAHDI, A. Review of multimodal machine
+  learning approaches in healthcare. *Information Fusion*, v. 114, art. 102690, 2025.
+  Disponível em: [doi.org/10.1016/j.inffus.2024.102690](https://doi.org/10.1016/j.inffus.2024.102690).
+- LIN, F.; WANG, K.; LAI, M.; WU, Y.; CHEN, C.; WANG, Y.; WANG, R. Multicenter study on
+  predicting postoperative upper limb muscle strength improvement in cervical spinal cord
+  injury patients using radiomics and deep learning. *Scientific Reports*, v. 15, art. 5805,
+  2025. Disponível em:
+  [nature.com/articles/s41598-024-72539-0](https://www.nature.com/articles/s41598-024-72539-0).
+- MAKI, S.; FURUYA, T.; INOUE, M.; SHIGA, Y.; INAGE, K.; EGUCHI, Y.; ORITA, S.; OHTORI, S.
+  Machine Learning and Deep Learning in Spinal Injury: A Narrative Review of Algorithms in
+  Diagnosis and Prognosis. *Journal of Clinical Medicine*, v. 13, n. 3, p. 705, 2024.
+  Disponível em: [mdpi.com/2077-0383/13/3/705](https://www.mdpi.com/2077-0383/13/3/705).
+- RSNA — RADIOLOGICAL SOCIETY OF NORTH AMERICA. RSNA 2024 Lumbar Spine Degenerative
+  Classification. Kaggle, 2024. Disponível em:
+  [kaggle.com/competitions/rsna-2024-lumbar-spine-degenerative-classification](https://www.kaggle.com/competitions/rsna-2024-lumbar-spine-degenerative-classification).
+- SHIMIZU, T.; INOMATA, K.; SUDA, K.; HARMON, S. M.; KOMATSU, M.; OTA, M.; USHIROZAKO, H.;
+  MINAMI, A.; MAKI, S.; ENDO, T.; YAMADA, K.; IWASAKI, N.; TAKAHASHI, H.; YAMAZAKI, M.; KODA,
+  M. A multimodal machine learning model integrating clinical and MRI data for predicting
+  neurological outcomes following surgical treatment for cervical spinal cord injury.
+  *European Spine Journal*, v. 34, n. 9, p. 3747-3755, 2025. Disponível em:
+  [link.springer.com/10.1007/s00586-025-08873-2](https://link.springer.com/10.1007/s00586-025-08873-2).
+- TORRES, A.; NIETO, J. J. Fuzzy Logic in Medicine and Bioinformatics. *Journal of Biomedicine
+  and Biotechnology*, v. 2006, art. ID 91908, 2006. Disponível em:
+  [pmc.ncbi.nlm.nih.gov/articles/PMC1559939](https://pmc.ncbi.nlm.nih.gov/articles/PMC1559939/).
+- WARNER, E.; LEE, J.; HSU, W.; SYEDA-MAHMOOD, T.; KAHN JR., C. E.; GEVAERT, O.; RAO, A.
+  Multimodal Machine Learning in Image-Based and Clinical Biomedicine: Survey and Prospects.
+  *International Journal of Computer Vision*, v. 132, n. 9, p. 3753-3769, 2024. Disponível em:
+  [link.springer.com/10.1007/s11263-024-02032-8](https://link.springer.com/10.1007/s11263-024-02032-8).
+- ZAITSEVA, E.; RABCAN, J.; KVASSAY, M.; LEVASHENKO, V. A New Fuzzy-Based Classification
+  Method for Use in Smart/Precision Medicine. *Bioengineering*, v. 10, n. 7, art. 838, 2023.
+  Disponível em:
+  [pmc.ncbi.nlm.nih.gov/articles/PMC10376790](https://pmc.ncbi.nlm.nih.gov/articles/PMC10376790/).
+- ZHANG, H.; YANG, Y.-F.; SONG, X.-L.; HU, H.-J.; YANG, Y.-Y.; ZHU, X.; YANG, C. An
+  interpretable artificial intelligence model based on CT for prognosis of intracerebral
+  hemorrhage: a multicenter study. *BMC Medical Imaging*, v. 24, n. 1, art. 170, 2024.
+  Disponível em:
+  [pmc.ncbi.nlm.nih.gov/articles/PMC11234657](https://pmc.ncbi.nlm.nih.gov/articles/PMC11234657/).
