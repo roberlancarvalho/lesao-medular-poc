@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "Se este software for útil para sua pesquisa, cite-o usando os metadados abaixo."
+type: software
+title: "lesao-medular-poc"
+abstract: >-
+  Prova de Conceito (PoC) de uma arquitetura multimodal de Inteligência Artificial
+  para apoio ao prognóstico de recuperação motora em lesão medular traumática,
+  integrando visão computacional (ResNet50, Isolation Forest, lógica fuzzy, Grad-CAM)
+  e predição clínica multimodal (Random Forest, XGBoost, SHAP) sobre variáveis
+  inspiradas no protocolo EMSCI.
+authors:
+  - family-names: Carvalho
+    given-names: Roberlan Oliveira de
+    orcid: "https://orcid.org/0009-0008-7724-3381"
+    affiliation: "Universidade Federal do Rio de Janeiro (UFRJ)"
+    email: roberlan.carvalho@gmail.com
+version: 1.0.0
+date-released: "2026-08-11"
+license: MIT
+repository-code: "https://github.com/roberlancarvalho/lesao-medular-poc"
+url: "https://lesao-medular-poc.streamlit.app/"
+keywords:
+  - lesão medular
+  - inteligência artificial explicável
+  - aprendizado multimodal
+  - visão computacional
+  - lógica fuzzy
+  - spinal cord injury
+  - explainable AI
+identifiers:
+  - type: url
+    value: "https://github.com/roberlancarvalho/lesao-medular-poc"
+    description: Repositório do código-fonte
+preferred-citation:
+  type: article
+  title: "Pipeline Multimodal para Prognóstico de Lesão Medular com Inteligência Artificial: Uma Arquitetura Baseada em Visão Computacional e Dados Clínicos"
+  authors:
+    - family-names: Carvalho
+      given-names: Roberlan Oliveira de
+      orcid: "https://orcid.org/0009-0008-7724-3381"
+      affiliation: "Universidade Federal do Rio de Janeiro (UFRJ)"
+  year: 2026
+  institution:
+    name: "Programa de Pós-Graduação em Informática, Universidade Federal do Rio de Janeiro (UFRJ)"
